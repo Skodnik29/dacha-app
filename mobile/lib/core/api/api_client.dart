@@ -83,6 +83,11 @@ class ApiClient {
       case 422:
         return ValidationException(detail, statusCode: status);
       case 401:
+      case 403:
+        // 403 трактуем как авторизационную ошибку: FastAPI'шный HTTPBearer
+        // в режиме auto_error=True исторически отдавал 403 на отсутствующий
+        // токен. Backend починен (см. PR fix/backend-auth-401-instead-of-403),
+        // но этот клиентский маппинг оставлен как защита от регрессий.
         return UnauthorizedException(detail);
       case 409:
         return ConflictException(detail);
@@ -110,8 +115,14 @@ class ApiClient {
 
 /// Интерцептор, который:
 /// 1. Подставляет Authorization: Bearer <access_token> в каждый запрос.
-/// 2. При 401 пробует обновить access_token через /auth/refresh
+/// 2. При 401/403 пробует обновить access_token через /auth/refresh
 ///    и повторяет оригинальный запрос.
+///
+/// Почему 403, а не только 401: FastAPI'шный HTTPBearer по умолчанию
+/// (auto_error=True) поднимает 403 на отсутствующий/битый заголовок
+/// Authorization. Наш backend это починили (см. PR backend-auth-401-
+/// instead-of-403), но клиент держит подстраховку — в любой момент
+/// может появиться сторонний эндпоинт или регрессия, дающие 403.
 class _AuthInterceptor extends Interceptor {
   final ApiClient _client;
 
@@ -142,9 +153,10 @@ class _AuthInterceptor extends Interceptor {
   ) async {
     final status = err.response?.statusCode;
     final isAuthEndpoint = err.requestOptions.path.contains('/auth/');
+    final isAuthError = status == 401 || status == 403;
 
-    // 401 на не-auth эндпоинте — пробуем обновить токен.
-    if (status == 401 && !isAuthEndpoint && !_client._isRefreshing) {
+    // 401/403 на не-auth эндпоинте — пробуем обновить токен.
+    if (isAuthError && !isAuthEndpoint && !_client._isRefreshing) {
       _client._isRefreshing = true;
       try {
         final refreshed = await _tryRefresh();
