@@ -1,5 +1,4 @@
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
 
 
 class Settings(BaseSettings):
@@ -15,7 +14,9 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     ALGORITHM: str = "HS256"
 
-    ALLOWED_ORIGINS: list[str] = ["http://localhost:3000"]
+    # Принимаем как строку через запятую, чтобы pydantic-settings
+    # не пытался парсить .env как JSON. Список получаем через свойство ниже.
+    ALLOWED_ORIGINS: str = "http://localhost:3000"
 
     UPLOAD_DIR: str = "/app/uploads"
     MAX_FILE_SIZE_MB: int = 10
@@ -23,12 +24,14 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
     OPENWEATHER_API_KEY: str = ""
 
-    @field_validator("ALLOWED_ORIGINS", mode="before")
-    @classmethod
-    def parse_origins(cls, v):
-        if isinstance(v, str):
-            return [item.strip() for item in v.split(",") if item.strip()]
-        return v
+    @property
+    def allowed_origins_list(self) -> list[str]:
+        """Список origin'ов для CORSMiddleware."""
+        return [
+            item.strip()
+            for item in self.ALLOWED_ORIGINS.split(",")
+            if item.strip()
+        ]
 
     class Config:
         env_file = ".env"
