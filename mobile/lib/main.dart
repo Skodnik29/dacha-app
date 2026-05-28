@@ -9,6 +9,7 @@ import 'core/plots/plots_provider.dart';
 import 'core/theme/app_theme.dart';
 import 'services/auth_service.dart';
 import 'services/plots_service.dart';
+import 'services/zones_service.dart';
 
 void main() {
   // Собираем зависимости один раз при старте приложения.
@@ -18,29 +19,36 @@ void main() {
 
   final authService = AuthService(apiClient, tokenStorage);
   final plotsService = PlotsService(apiClient);
+  final zonesService = ZonesService(apiClient);
 
   runApp(DachaApp(
     authService: authService,
     plotsService: plotsService,
+    zonesService: zonesService,
   ));
 }
 
 class DachaApp extends StatelessWidget {
   final AuthService authService;
   final PlotsService plotsService;
+  final ZonesService zonesService;
 
   const DachaApp({
     super.key,
     required this.authService,
     required this.plotsService,
+    required this.zonesService,
   });
 
   @override
   Widget build(BuildContext context) {
-    // MultiProvider регистрирует сразу несколько ChangeNotifier'ов.
-    // Любой виджет ниже по дереву может подписаться через context.watch/read.
+    // MultiProvider регистрирует сразу несколько зависимостей и состояний.
     return MultiProvider(
       providers: [
+        // Сервис зон как обычный провайдер (без собственного состояния).
+        Provider<ZonesService>.value(value: zonesService),
+
+        // Состояния.
         ChangeNotifierProvider(create: (_) => AuthProvider(authService)),
         ChangeNotifierProvider(create: (_) => PlotsProvider(plotsService)),
       ],

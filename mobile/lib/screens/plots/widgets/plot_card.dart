@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
+import '../plot_detail_screen.dart';
 import '../../../models/plot.dart';
 
 /// Карточка одного участка в списке.
 ///
-/// Пока — без действия по тапу (экран деталей будет в следующей итерации).
+/// По тапу открывает экран деталей участка с зонами.
 class PlotCard extends StatelessWidget {
   final Plot plot;
 
@@ -30,8 +31,11 @@ class PlotCard extends StatelessWidget {
         subtitle: _buildSubtitle(),
         trailing: _RoleBadge(role: plot.role),
         onTap: () {
-          // Заглушка — экран деталей участка пока не сделан.
-          // В следующей итерации откроем PlotDetailsScreen.
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => PlotDetailScreen(plot: plot),
+            ),
+          );
         },
       ),
     );
@@ -49,8 +53,11 @@ class PlotCard extends StatelessWidget {
     if (parts.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: 4),
-      child: Text(parts.join(' · '),
-          maxLines: 2, overflow: TextOverflow.ellipsis),
+      child: Text(
+        parts.join(' · '),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
     );
   }
 
@@ -118,7 +125,11 @@ class _RoleBadge extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(color: fg, fontSize: 12, fontWeight: FontWeight.w500),
+        style: TextStyle(
+          color: fg,
+          fontSize: 12,
+          fontWeight: FontWeight.w500,
+        ),
       ),
     );
   }
