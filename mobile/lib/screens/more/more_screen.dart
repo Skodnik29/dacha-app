@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../core/auth/auth_provider.dart';
+import '../../core/plots/plots_provider.dart';
+import '../plots/plots_screen.dart';
 import 'widgets/menu_item.dart';
 import 'widgets/menu_section.dart';
 
@@ -37,6 +39,17 @@ class MoreScreen extends StatelessWidget {
 
           // Разделы
           const MenuSection(title: 'Участок'),
+          // “Мои участки” — единственный пункт в этой секции с реальным API.
+          // Остальные (карта, зоны, посадки...) пока заглушки.
+          MenuItem(
+            icon: Icons.yard,
+            title: 'Мои участки',
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const PlotsScreen()),
+              );
+            },
+          ),
           MenuItem(icon: Icons.map_outlined, title: 'Карта участка', onTap: () {}),
           MenuItem(icon: Icons.grass, title: 'Зоны и грядки', onTap: () {}),
           MenuItem(icon: Icons.eco, title: 'Посадки', onTap: () {}),
@@ -79,6 +92,9 @@ class MoreScreen extends StatelessWidget {
                 ),
               );
               if (confirmed == true && context.mounted) {
+                // Сначала сбрасываем список участков, чтобы следующий юзер
+                // не видел чужие участки в памяти Provider'а.
+                context.read<PlotsProvider>().reset();
                 await context.read<AuthProvider>().logout();
               }
             },
