@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from app.core.database import get_db
 from app.core.deps import get_current_user
@@ -20,22 +21,22 @@ router = APIRouter()
 
 @router.get("/catalog", response_model=list[PlantCatalogResponse])
 async def get_plant_catalog(
-    plant_type: str | None = Query(None, description="Фильтр по типу: vegetable, tree, berry..."),
+    plant_type: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Получить весь справочник культур (системные + пользовательские)."""
-    stmt = select(PlantCatalog)
+    stmt = (
+        select(PlantCatalog)
+        .options(selectinload(PlantCatalog.varieties))
+        .where(
+            (PlantCatalog.is_custom == False) |
+            (PlantCatalog.created_by == current_user.id)
+        )
+    )
     if plant_type:
         stmt = stmt.where(PlantCatalog.plant_type == plant_type)
-    # Системные + собственные пользователя
-    stmt = stmt.where(
-        (PlantCatalog.is_custom == False) |
-        (PlantCatalog.created_by == current_user.id)
-    )
     result = await db.execute(stmt)
-    plants = result.scalars().unique().all()
-    return plants
+    return result.scalars().unique().all()
 
 
 @router.post("/catalog", response_model=PlantCatalogResponse, status_code=201)
@@ -44,7 +45,6 @@ async def create_plant_in_catalog(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Добавить свою культуру в справочник."""
     plant = PlantCatalog(
         **data.model_dump(),
         is_custom=True,
@@ -52,7 +52,7 @@ async def create_plant_in_catalog(
     )
     db.add(plant)
     await db.flush()
-    await db.refresh(plant)
+    await db.refresh(plant, ["varieties"])
     return plant
 
 
@@ -62,7 +62,12 @@ async def get_plant(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    plant = await db.get(PlantCatalog, plant_id)
+    result = await db.execute(
+        select(PlantCatalog)
+        .options(selectinload(PlantCatalog.varieties))
+        .where(PlantCatalog.id == plant_id)
+    )
+    plant = result.scalar_one_or_none()
     if not plant:
         raise HTTPException(status_code=404, detail="Культура не найдена")
     return plant
@@ -86,22 +91,16 @@ async def get_varieties(
     return result.scalars().all()
 
 
-@router.post(
-    "/catalog/{plant_id}/varieties",
-    response_model=PlantVarietyResponse,
-    status_code=201
-)
+@router.post("/catalog/{plant_id}/varieties", response_model=PlantVarietyResponse, status_code=201)
 async def add_variety(
     plant_id: str,
     data: PlantVarietyCreate,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Добавить свой сорт к существующей культуре."""
     plant = await db.get(PlantCatalog, plant_id)
     if not plant:
         raise HTTPException(status_code=404, detail="Культура не найдена")
-
     variety = PlantVariety(
         plant_id=plant_id,
         name=data.name,
@@ -118,18 +117,15 @@ async def add_variety(
 # ── Экземпляры растений в зоне ────────────────────────────────────────────
 
 async def _check_zone_access(zone_id: str, user_id: str, db: AsyncSession, require_write=False):
-    """Проверка доступа к зоне через участок."""
     zone = await db.get(Zone, zone_id)
     if not zone:
         raise HTTPException(status_code=404, detail="Зона не найдена")
-
     stmt = select(UserPlotRole).where(
         UserPlotRole.plot_id == zone.plot_id,
         UserPlotRole.user_id == user_id,
     )
     if require_write:
         stmt = stmt.where(UserPlotRole.role.in_(["admin", "member"]))
-
     result = await db.execute(stmt)
     if not result.scalar_one_or_none():
         raise HTTPException(status_code=403, detail="Нет доступа к зоне")
@@ -139,21 +135,24 @@ async def _check_zone_access(zone_id: str, user_id: str, db: AsyncSession, requi
 @router.get("/zones/{zone_id}/plants", response_model=list[PlantInstanceResponse])
 async def get_zone_plants(
     zone_id: str,
-    status: str | None = Query(None, description="Фильтр по статусу: active, planned..."),
+    status: str | None = Query(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Все растения в зоне."""
     await _check_zone_access(zone_id, current_user.id, db)
-
-    stmt = select(PlantInstance).where(PlantInstance.zone_id == zone_id)
+    stmt = (
+        select(PlantInstance)
+        .options(
+            selectinload(PlantInstance.plant),
+            selectinload(PlantInstance.variety),
+        )
+        .where(PlantInstance.zone_id == zone_id)
+    )
     if status:
         stmt = stmt.where(PlantInstance.status == status)
-
     result = await db.execute(stmt)
     instances = result.scalars().all()
 
-    # Обогащаем ответ именами из каталога
     out = []
     for inst in instances:
         r = PlantInstanceResponse.model_validate(inst)
@@ -173,29 +172,24 @@ async def add_plant_to_zone(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Посадить растение в зону."""
     await _check_zone_access(zone_id, current_user.id, db, require_write=True)
-
-    # Проверяем, что культура существует
     plant = await db.get(PlantCatalog, data.plant_id)
     if not plant:
         raise HTTPException(status_code=404, detail="Культура не найдена в справочнике")
-
-    # Проверяем сорт, если указан
     if data.variety_id:
         variety = await db.get(PlantVariety, data.variety_id)
-        if not variety or variety.plant_id != data.plant_id:
+        if not variety or str(variety.plant_id) != str(data.plant_id):
             raise HTTPException(status_code=400, detail="Сорт не принадлежит данной культуре")
-
+    
     instance = PlantInstance(
         zone_id=zone_id,
         created_by=current_user.id,
         **data.model_dump(),
     )
+    
     db.add(instance)
     await db.flush()
     await db.refresh(instance)
-
     r = PlantInstanceResponse.model_validate(instance)
     r.plant_name = plant.name
     r.plant_type = plant.plant_type
@@ -211,17 +205,18 @@ async def update_plant_instance(
     db: AsyncSession = Depends(get_db),
 ):
     await _check_zone_access(zone_id, current_user.id, db, require_write=True)
-
-    instance = await db.get(PlantInstance, instance_id)
-    if not instance or instance.zone_id != zone_id:
+    result = await db.execute(
+        select(PlantInstance)
+        .options(selectinload(PlantInstance.plant), selectinload(PlantInstance.variety))
+        .where(PlantInstance.id == instance_id, PlantInstance.zone_id == zone_id)
+    )
+    instance = result.scalar_one_or_none()
+    if not instance:
         raise HTTPException(status_code=404, detail="Растение не найдено")
-
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(instance, key, value)
-
     await db.flush()
     await db.refresh(instance)
-
     r = PlantInstanceResponse.model_validate(instance)
     if instance.plant:
         r.plant_name = instance.plant.name
@@ -239,9 +234,7 @@ async def remove_plant_from_zone(
     db: AsyncSession = Depends(get_db),
 ):
     await _check_zone_access(zone_id, current_user.id, db, require_write=True)
-
     instance = await db.get(PlantInstance, instance_id)
-    if not instance or instance.zone_id != zone_id:
+    if not instance or str(instance.zone_id) != zone_id:
         raise HTTPException(status_code=404, detail="Растение не найдено")
-
     await db.delete(instance)

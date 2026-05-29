@@ -1,19 +1,15 @@
 import 'package:flutter/material.dart';
-
 import '../../../models/zone.dart';
 
-/// Карточка одной зоны на участке.
-///
-/// Показывает название, тип и описание (если есть).
 class ZoneCard extends StatelessWidget {
   final Zone zone;
+  final VoidCallback? onTap; // ← добавили
 
-  const ZoneCard({super.key, required this.zone});
+  const ZoneCard({super.key, required this.zone, this.onTap}); // ← добавили
 
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-
     final iconData = _iconForType(zone.zoneType);
     final bgColor = _colorForType(colorScheme, zone.zoneType);
 
@@ -31,21 +27,20 @@ class ZoneCard extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         subtitle: _buildSubtitle(),
-        // В будущем сюда можно добавить onTap → детали зоны.
+        trailing: onTap != null
+            ? const Icon(Icons.chevron_right, color: Colors.grey)
+            : null,
+        onTap: onTap, // ← добавили
       ),
     );
   }
 
   Widget _buildSubtitle() {
     final parts = <String>[];
-
-    // Тип зоны — человекочитаемый.
     parts.add(_humanType(zone.zoneType));
-
     if (zone.description != null && zone.description!.isNotEmpty) {
       parts.add(zone.description!);
     }
-
     if (parts.isEmpty) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(top: 4),
@@ -59,52 +54,31 @@ class ZoneCard extends StatelessWidget {
 
   String _humanType(String raw) {
     switch (raw) {
-      case 'garden':
-        return 'Огород';
-      case 'greenhouse':
-        return 'Теплица';
-      case 'flowerbed':
-        return 'Клумба';
-      case 'lawn':
-        return 'Газон';
-      case 'orchard':
-        return 'Сад';
-      default:
-        return 'Другая зона';
+      case 'garden':     return 'Огород';
+      case 'greenhouse': return 'Теплица';
+      case 'flowerbed':  return 'Клумба';
+      case 'lawn':       return 'Газон';
+      case 'orchard':    return 'Сад';
+      default:           return 'Зона';
     }
   }
 
-  IconData _iconForType(String raw) {
-    switch (raw) {
-      case 'garden':
-        return Icons.grass;
-      case 'greenhouse':
-        return Icons.house_siding;
-      case 'flowerbed':
-        return Icons.local_florist;
-      case 'lawn':
-        return Icons.park;
-      case 'orchard':
-        return Icons.forest;
-      default:
-        return Icons.yard;
+  IconData _iconForType(String type) {
+    switch (type) {
+      case 'greenhouse': return Icons.home_work_outlined;
+      case 'flowerbed':  return Icons.local_florist_outlined;
+      case 'lawn':       return Icons.grass;
+      case 'orchard':    return Icons.park_outlined;
+      default:           return Icons.grid_on;
     }
   }
 
-  Color _colorForType(ColorScheme scheme, String raw) {
-    switch (raw) {
-      case 'garden':
-        return scheme.primaryContainer;
-      case 'greenhouse':
-        return scheme.tertiaryContainer;
-      case 'flowerbed':
-        return scheme.secondaryContainer;
-      case 'lawn':
-        return scheme.primaryContainer.withOpacity(0.8);
-      case 'orchard':
-        return scheme.tertiaryContainer.withOpacity(0.9);
-      default:
-        return scheme.surfaceVariant;
+  Color _colorForType(ColorScheme cs, String type) {
+    switch (type) {
+      case 'greenhouse': return cs.tertiaryContainer;
+      case 'flowerbed':  return cs.errorContainer;
+      case 'lawn':       return cs.secondaryContainer;
+      default:           return cs.primaryContainer;
     }
   }
 }
