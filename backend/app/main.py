@@ -25,7 +25,7 @@ app = FastAPI(
 # CORS — разрешаем запросы от Flutter Web и мобильного приложения
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.allowed_origins_list,
+    allow_origins=["http://localhost:8080"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

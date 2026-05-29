@@ -3,12 +3,11 @@ import 'package:provider/provider.dart';
 
 import '../../core/zones/zones_provider.dart';
 import '../../models/plot.dart';
-import '../../models/zone.dart';
 import '../../services/zones_service.dart';
 import 'create_zone_screen.dart';
 import 'widgets/zone_card.dart';
+import 'zone_detail_screen.dart';
 
-/// Экран деталей участка: краткая информация + список зон.
 class PlotDetailScreen extends StatefulWidget {
   final Plot plot;
 
@@ -19,48 +18,49 @@ class PlotDetailScreen extends StatefulWidget {
 }
 
 class _PlotDetailScreenState extends State<PlotDetailScreen> {
+  // ✅ Провайдер создаётся здесь — он живёт столько же сколько экран
+  late final ZonesProvider _zonesProvider;
+
   @override
   void initState() {
     super.initState();
-    // Первичная загрузка зон после первого фрейма.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final provider = context.read<ZonesProvider>();
-      if (provider.status == ZonesStatus.initial) {
-        provider.loadZones();
-      }
-    });
+    // ✅ Создаём напрямую через сервис из context — безопасно в initState
+    final service = context.read<ZonesService>();
+    _zonesProvider = ZonesProvider(service, plotId: widget.plot.id);
+    // ✅ Загружаем сразу — провайдер уже готов
+    _zonesProvider.loadZones();
   }
 
-  Future<void> _openCreateZone(ZonesProvider provider) async {
-  await Navigator.of(context).push<bool>(
-    MaterialPageRoute(
-      // Передаём уже существующий провайдер явно через конструктор
-      builder: (_) => CreateZoneScreen(zonesProvider: provider),
-    ),
-  );
-}
+  @override
+  void dispose() {
+    _zonesProvider.dispose();
+    super.dispose();
+  }
+
+  Future<void> _openCreateZone() async {
+    await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => CreateZoneScreen(zonesProvider: _zonesProvider),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    // Получаем ZonesService из корневого Provider и создаём
-    // локальный ZonesProvider, живущий только на этом экране.
-    return Consumer<ZonesService>(
-      builder: (context, service, _) {
-        return ChangeNotifierProvider(
-          create: (_) => ZonesProvider(
-            service,
-            plotId: widget.plot.id,
-          ),
-          child: _PlotDetailContent(plot: widget.plot, onAddZone: _openCreateZone),
-        );
-      },
+    // ✅ Передаём уже созданный провайдер через .value — без пересоздания
+    return ChangeNotifierProvider<ZonesProvider>.value(
+      value: _zonesProvider,
+      child: _PlotDetailContent(
+        plot: widget.plot,
+        onAddZone: _openCreateZone,
+      ),
     );
   }
 }
 
 class _PlotDetailContent extends StatelessWidget {
   final Plot plot;
-  final void Function(ZonesProvider) onAddZone; // ← было VoidCallback
+  final VoidCallback onAddZone;
 
   const _PlotDetailContent({
     required this.plot,
@@ -79,7 +79,7 @@ class _PlotDetailContent extends StatelessWidget {
         foregroundColor: Colors.white,
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => onAddZone(zonesProvider), // ← передаём провайдер
+        onPressed: onAddZone,
         icon: const Icon(Icons.add),
         label: const Text('Добавить зону'),
       ),
@@ -87,13 +87,13 @@ class _PlotDetailContent extends StatelessWidget {
         children: [
           _PlotHeader(plot: plot),
           const Divider(height: 0),
-          Expanded(child: _buildZonesBody(zonesProvider)),
+          Expanded(child: _buildZonesBody(context, zonesProvider)),
         ],
       ),
     );
   }
 
-  Widget _buildZonesBody(ZonesProvider provider) {
+  Widget _buildZonesBody(BuildContext context, ZonesProvider provider) {
     if (provider.status == ZonesStatus.initial ||
         (provider.isLoading && provider.zones.isEmpty)) {
       return const Center(child: CircularProgressIndicator());
@@ -107,7 +107,7 @@ class _PlotDetailContent extends StatelessWidget {
     }
 
     if (provider.isEmpty) {
-  return _ZonesEmptyView(onCreate: () => onAddZone(provider));
+      return _ZonesEmptyView(onCreate: onAddZone);
     }
 
     return RefreshIndicator(
@@ -119,7 +119,14 @@ class _PlotDetailContent extends StatelessWidget {
           final zone = provider.zones[i];
           return Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: ZoneCard(zone: zone),
+            child: ZoneCard(
+              zone: zone,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => ZoneDetailScreen(zone: zone),
+                ),
+              ),
+            ),
           );
         },
       ),
@@ -127,7 +134,6 @@ class _PlotDetailContent extends StatelessWidget {
   }
 }
 
-/// Верхний блок с краткой информацией об участке.
 class _PlotHeader extends StatelessWidget {
   final Plot plot;
   const _PlotHeader({required this.plot});
@@ -186,12 +192,10 @@ class _PlotHeader extends StatelessWidget {
   }
 
   String _formatDate(DateTime dt) {
-    // Пока простое форматирование ISO → yyyy-mm-dd.
     return dt.toLocal().toString().split(' ').first;
   }
 }
 
-/// Заглушка для пустого списка зон.
 class _ZonesEmptyView extends StatelessWidget {
   final VoidCallback onCreate;
   const _ZonesEmptyView({required this.onCreate});
@@ -231,7 +235,6 @@ class _ZonesEmptyView extends StatelessWidget {
   }
 }
 
-/// Заглушка для ошибки загрузки зон.
 class _ZonesErrorView extends StatelessWidget {
   final String message;
   final Future<void> Function() onRetry;
